@@ -1,0 +1,20 @@
+node_modules
+.DS_Store
+dist
+dist-ssr
+*.local
+.env
+.nitro
+.tanstack
+.wrangler
+.output
+.vinxi
+__unconfig*
+todos.json
+
+# local data — financial statements & the SQLite DB never get committed
+/data
+/samples
+*.db
+*.db-shm
+*.db-wal

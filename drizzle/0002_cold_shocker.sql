@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `pending` integer DEFAULT false NOT NULL;
