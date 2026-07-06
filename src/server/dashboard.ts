@@ -4,8 +4,16 @@ import { db } from '#/db/client.ts'
 import { accounts, companies, transactions } from '#/db/schema.ts'
 import type { Transaction } from '#/db/types.ts'
 
+/** CHF value in minor units; null when a foreign amount has no stored rate. */
+function chfOrNull(t: Transaction): number | null {
+  if (t.chfEquiv != null) return Math.abs(t.chfEquiv)
+  return t.currency === 'CHF' ? Math.abs(t.amount) : null
+}
+
+// Unconvertible foreign amounts count as 0 rather than passing their raw
+// minor units off as CHF; totals.missingFx reports how many were skipped.
 function chf(t: Transaction): number {
-  return Math.abs(t.chfEquiv ?? (t.currency === 'CHF' ? t.amount : t.amount))
+  return chfOrNull(t) ?? 0
 }
 
 export const getDashboard = createServerFn({ method: 'GET' }).handler(async () => {
@@ -99,6 +107,7 @@ export const getDashboard = createServerFn({ method: 'GET' }).handler(async () =
     totals: {
       cardExpenses: cardDebits.length,
       unclassified,
+      missingFx: cardDebits.filter((t) => chfOrNull(t) == null).length,
       pending: cardDebits.filter((t) => t.pending).length,
       bankCredits: bankCredits.length,
       privateCount: cardDebits.filter((t) => t.classification === 'private')

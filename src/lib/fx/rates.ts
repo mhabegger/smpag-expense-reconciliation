@@ -1,6 +1,7 @@
-import { and, eq, lte } from 'drizzle-orm'
+import { and, eq, gte, lte } from 'drizzle-orm'
 import { db } from '#/db/client.ts'
 import { fxRates } from '#/db/schema.ts'
+import { addDays } from '#/lib/date.ts'
 import { currencyDecimals } from '#/lib/money.ts'
 
 const FRANKFURTER_BASE = 'https://api.frankfurter.dev/v1'
@@ -84,12 +85,16 @@ export async function ensureChfRates(
   for (const [date, currencies] of byDate) {
     const missing: string[] = []
     for (const cur of currencies) {
+      // a cached rate only counts if it's near the requested date (5 days
+      // covers ECB weekends/holidays) — without the lower bound, one ancient
+      // rate suppressed fetching forever and carried forward for months
       const have = db
         .select({ id: fxRates.id })
         .from(fxRates)
         .where(
           and(
             lte(fxRates.date, date),
+            gte(fxRates.date, addDays(date, -5)),
             eq(fxRates.base, cur),
             eq(fxRates.quote, 'CHF'),
           ),
@@ -112,27 +117,33 @@ export async function ensureChfRates(
 }
 
 /** All cached rates loaded for fast synchronous lookup during a matching run. */
+interface RateRow {
+  date: string
+  rate: number
+  pref: number
+}
+
 export interface RateMap {
-  rows: Array<{
-    date: string
-    base: string
-    quote: string
-    rate: number
-    pref: number
-  }>
+  /** rows bucketed by "BASE|QUOTE", sorted ascending by date */
+  buckets: Map<string, RateRow[]>
 }
 
 export function loadRateMap(): RateMap {
   const rows = db.select().from(fxRates).all()
-  return {
-    rows: rows.map((r) => ({
+  const buckets = new Map<string, RateRow[]>()
+  for (const r of rows) {
+    const key = `${r.base}|${r.quote}`
+    let bucket = buckets.get(key)
+    if (!bucket) buckets.set(key, (bucket = []))
+    bucket.push({
       date: r.date,
-      base: r.base,
-      quote: r.quote,
       rate: r.rate,
       pref: SOURCE_PRECEDENCE[r.source as RateSource] ?? 0,
-    })),
+    })
   }
+  for (const bucket of buckets.values())
+    bucket.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  return { buckets }
 }
 
 function bestRate(
@@ -141,25 +152,38 @@ function bestRate(
   base: string,
   quote: string,
 ): number | null {
+  const bucket = map.buckets.get(`${base}|${quote}`)
+  if (!bucket) return null
   const d = isoDate(date)
-  let best: { date: string; pref: number; rate: number } | null = null
-  for (const r of map.rows) {
-    if (r.base !== base || r.quote !== quote) continue
-    if (r.date > d) continue
-    if (
-      !best ||
-      r.date > best.date ||
-      (r.date === best.date && r.pref > best.pref)
-    ) {
-      best = { date: r.date, pref: r.pref, rate: r.rate }
+  // last row with date <= d (bucket is date-ascending); at equal dates the
+  // higher source precedence wins
+  let best: RateRow | null = null
+  for (const r of bucket) {
+    if (r.date > d) break
+    if (!best || r.date > best.date || (r.date === best.date && r.pref > best.pref)) {
+      best = r
     }
   }
   return best?.rate ?? null
 }
 
+function directOrInverse(
+  map: RateMap,
+  date: string,
+  base: string,
+  quote: string,
+): number | null {
+  const direct = bestRate(map, date, base, quote)
+  if (direct != null) return direct
+  const inverse = bestRate(map, date, quote, base)
+  if (inverse != null && inverse !== 0) return 1 / inverse
+  return null
+}
+
 /**
  * Synchronous rate lookup from a preloaded map. Tries direct, inverse, and
- * cross-via-EUR. Returns null if no rate is derivable.
+ * cross via CHF (the hub actually populated by ensureChfRates) then EUR.
+ * Returns null if no rate is derivable.
  */
 export function rateFromMap(
   map: RateMap,
@@ -170,15 +194,13 @@ export function rateFromMap(
   base = base.toUpperCase()
   quote = quote.toUpperCase()
   if (base === quote) return 1
-  const direct = bestRate(map, date, base, quote)
-  if (direct != null) return direct
-  const inverse = bestRate(map, date, quote, base)
-  if (inverse != null && inverse !== 0) return 1 / inverse
-  // cross via EUR
-  if (base !== 'EUR' && quote !== 'EUR') {
-    const baseEur = rateFromMap(map, date, base, 'EUR')
-    const eurQuote = rateFromMap(map, date, 'EUR', quote)
-    if (baseEur != null && eurQuote != null) return baseEur * eurQuote
+  const di = directOrInverse(map, date, base, quote)
+  if (di != null) return di
+  for (const hub of ['CHF', 'EUR']) {
+    if (base === hub || quote === hub) continue
+    const baseHub = directOrInverse(map, date, base, hub)
+    const hubQuote = directOrInverse(map, date, hub, quote)
+    if (baseHub != null && hubQuote != null) return baseHub * hubQuote
   }
   return null
 }

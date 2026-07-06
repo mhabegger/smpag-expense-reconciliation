@@ -112,8 +112,11 @@ export function merchantSimilarity(
   const lev = levenshteinRatio(aNorm, bNorm)
   let score =
     blend.tokenSet * ts + blend.jaroWinkler * jw + blend.levenshtein * lev
-  // substring containment bonus (card merchant often a substring of acct desc)
-  if (aNorm.includes(bNorm) || bNorm.includes(aNorm)) {
+  // substring containment bonus (card merchant often a substring of acct
+  // desc) — only for substrings long enough to be meaningful: a merchant
+  // normalizing to "bp" must not hit 0.85 against anything containing "bp"
+  const shorter = aNorm.length <= bNorm.length ? aNorm : bNorm
+  if (shorter.length >= 4 && (aNorm.includes(bNorm) || bNorm.includes(aNorm))) {
     score = Math.max(score, 0.85)
   }
   return Math.max(0, Math.min(1, score))

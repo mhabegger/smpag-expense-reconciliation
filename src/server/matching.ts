@@ -37,6 +37,16 @@ const queueFilter = z.object({
   institute: z.string().optional(),
 })
 
+// "open" = classified to a company but not fully reconciled — used by BOTH
+// the filter and the count so the badge always equals the rows shown
+function isOpen(t: Transaction): boolean {
+  return (
+    (t.classification === 'deliver_media' ||
+      t.classification === 'swiss_media_partners') &&
+    (t.reconStatus === 'open' || t.reconStatus === 'partially_matched')
+  )
+}
+
 export const getReconQueue = createServerFn({ method: 'POST' })
   .validator((d: unknown) => queueFilter.parse(d ?? {}))
   .handler(async ({ data: f }) => {
@@ -59,8 +69,7 @@ export const getReconQueue = createServerFn({ method: 'POST' })
         if (f.status === 'unclassified')
           return t.classification === 'unclassified'
         if (f.status === 'pending') return t.pending
-        if (f.status === 'open')
-          return t.reconStatus === 'open' || t.reconStatus === 'partially_matched'
+        if (f.status === 'open') return isOpen(t)
         if (f.status === 'reconciled') return t.reconStatus === 'matched'
         return true
       })
@@ -88,12 +97,7 @@ export const getReconQueue = createServerFn({ method: 'POST' })
       unclassified: all.filter((t) => t.classification === 'unclassified').length,
       reconciled: all.filter((t) => t.reconStatus === 'matched').length,
       pending: all.filter((t) => t.pending).length,
-      open: all.filter(
-        (t) =>
-          t.classification !== 'unclassified' &&
-          t.classification !== 'private' &&
-          t.reconStatus !== 'matched',
-      ).length,
+      open: all.filter(isOpen).length,
     }
     return { items, counts }
   })
@@ -109,7 +113,7 @@ function txById(ids: string[]): Map<string, Transaction> {
 }
 
 export const getReconcileItem = createServerFn({ method: 'GET' })
-  .validator((id: string) => id)
+  .validator((d: unknown) => z.string().min(1).parse(d))
   .handler(async ({ data: id }) => {
     const tx = db.select().from(transactions).where(eq(transactions.id, id)).get()
     if (!tx) return null
@@ -251,8 +255,11 @@ export const getReconcileItem = createServerFn({ method: 'GET' })
     }
   })
 
+/** Thrown inside the confirm transaction to roll back with a user-facing message. */
+class ConfirmError extends Error {}
+
 export const confirmCandidate = createServerFn({ method: 'POST' })
-  .validator((id: string) => id)
+  .validator((d: unknown) => z.string().min(1).parse(d))
   .handler(async ({ data: candidateId }) => {
     const cand = db
       .select()
@@ -262,7 +269,29 @@ export const confirmCandidate = createServerFn({ method: 'POST' })
     if (!cand) return { ok: false as const, error: 'Candidate not found' }
 
     const rateMap = loadRateMap()
-    const result = db.transaction((tx) => {
+    let result: { affected: string[]; groupIds: string[] }
+    try {
+      result = db.transaction((tx) => {
+      // candidates are a cache generated against an older snapshot: a tx may
+      // have been consumed by another confirmation since. Re-check here or one
+      // bank credit could "reimburse" two unrelated expenses.
+      const isUsed = (
+        txId: string,
+        matchType: 'accounting' | 'reimbursement',
+      ): boolean =>
+        !!tx
+          .select({ id: matchGroupMembers.id })
+          .from(matchGroupMembers)
+          .innerJoin(matchGroups, eq(matchGroupMembers.groupId, matchGroups.id))
+          .where(
+            and(
+              eq(matchGroupMembers.txId, txId),
+              eq(matchGroups.matchType, matchType),
+              isNull(matchGroups.revokedAt),
+            ),
+          )
+          .limit(1)
+          .get()
       const groupIds: string[] = []
       const createGroup = (
         anchorId: string,
@@ -295,7 +324,13 @@ export const confirmCandidate = createServerFn({ method: 'POST' })
           .select()
           .from(transactions)
           .where(eq(transactions.id, cand.candidateTxId))
-          .get()!
+          .get()
+        if (!target)
+          throw new ConfirmError('Accounting entry no longer exists')
+        if (isUsed(target.id, 'accounting'))
+          throw new ConfirmError(
+            'This accounting entry is already matched to another expense',
+          )
         createGroup(
           cand.anchorTxId,
           'accounting',
@@ -318,7 +353,12 @@ export const confirmCandidate = createServerFn({ method: 'POST' })
           .select()
           .from(transactions)
           .where(eq(transactions.id, cand.candidateTxId))
-          .get()!
+          .get()
+        if (!bank) throw new ConfirmError('Bank credit no longer exists')
+        if (isUsed(bank.id, 'reimbursement'))
+          throw new ConfirmError(
+            'This bank credit already reimburses another expense',
+          )
         const expenseIds = cand.groupMemberIds ?? [cand.anchorTxId]
         for (const expId of expenseIds) {
           const exp = tx
@@ -327,16 +367,25 @@ export const confirmCandidate = createServerFn({ method: 'POST' })
             .where(eq(transactions.id, expId))
             .get()
           if (!exp) continue
+          if (exp.bankLinked)
+            throw new ConfirmError(
+              'An expense in this group is already reimbursed — re-run matching',
+            )
           const contributed =
             exp.currency === bank.currency
               ? Math.abs(exp.amount)
-              : (convertMinor(
+              : convertMinor(
                   rateMap,
                   Math.abs(exp.amount),
                   exp.currency,
                   bank.currency,
                   exp.txDate,
-                ) ?? Math.abs(exp.amount))
+                )
+          // never record raw foreign minor units as a bank-currency amount
+          if (contributed == null)
+            throw new ConfirmError(
+              `No FX rate for ${exp.currency}→${bank.currency} on ${exp.txDate} — run matching to fetch rates`,
+            )
           createGroup(expId, 'reimbursement', bank.id, contributed, bank.currency)
           affected.push(expId)
           tx.delete(matchCandidates)
@@ -360,7 +409,12 @@ export const confirmCandidate = createServerFn({ method: 'POST' })
         })
         .run()
       return { affected, groupIds }
-    })
+      })
+    } catch (e) {
+      if (e instanceof ConfirmError)
+        return { ok: false as const, error: e.message }
+      throw e
+    }
 
     for (const id of result.affected) recomputeAnchorStatus(id)
     return {
@@ -371,27 +425,29 @@ export const confirmCandidate = createServerFn({ method: 'POST' })
   })
 
 export const rejectCandidate = createServerFn({ method: 'POST' })
-  .validator((id: string) => id)
+  .validator((d: unknown) => z.string().min(1).parse(d))
   .handler(async ({ data: candidateId }) => {
-    db.update(matchCandidates)
+    const res = db
+      .update(matchCandidates)
       .set({ status: 'dismissed' })
       .where(eq(matchCandidates.id, candidateId))
       .run()
-    return { ok: true as const }
+    return { ok: res.changes > 0 }
   })
 
 export const restoreCandidate = createServerFn({ method: 'POST' })
-  .validator((id: string) => id)
+  .validator((d: unknown) => z.string().min(1).parse(d))
   .handler(async ({ data: candidateId }) => {
-    db.update(matchCandidates)
+    const res = db
+      .update(matchCandidates)
       .set({ status: 'suggested' })
       .where(eq(matchCandidates.id, candidateId))
       .run()
-    return { ok: true as const }
+    return { ok: res.changes > 0 }
   })
 
 export const revokeGroup = createServerFn({ method: 'POST' })
-  .validator((id: string) => id)
+  .validator((d: unknown) => z.string().min(1).parse(d))
   .handler(async ({ data: groupId }) => {
     const g = db
       .select()
@@ -402,6 +458,14 @@ export const revokeGroup = createServerFn({ method: 'POST' })
     db.update(matchGroups)
       .set({ revokedAt: new Date() })
       .where(eq(matchGroups.id, groupId))
+      .run()
+    db.insert(auditLog)
+      .values({
+        entity: 'match',
+        entityId: g.anchorTxId,
+        action: 'revoke_group',
+        detail: { groupId, matchType: g.matchType },
+      })
       .run()
     recomputeAnchorStatus(g.anchorTxId)
     return { ok: true as const }
