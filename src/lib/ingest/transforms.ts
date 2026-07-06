@@ -10,7 +10,8 @@ const REF_DATE = new Date(0)
 export function excelSerialToIso(serial: number): string | null {
   if (!Number.isFinite(serial) || serial <= 0) return null
   // Excel epoch is 1899-12-30 (accounts for the 1900 leap-year bug).
-  const ms = Math.round(serial) * 86400000
+  // Truncate the fraction: it is the time of day, not a rounding artifact.
+  const ms = Math.floor(serial) * 86400000
   const d = new Date(Date.UTC(1899, 11, 30) + ms)
   if (Number.isNaN(d.getTime())) return null
   return d.toISOString().slice(0, 10)
@@ -30,9 +31,9 @@ export function parseDateFlexible(
   if (value == null || value === '') return null
 
   if (value instanceof Date) {
-    return Number.isNaN(value.getTime())
-      ? null
-      : value.toISOString().slice(0, 10)
+    // xlsx (cellDates: true) builds Dates in local time; toISOString would
+    // shift the calendar day for any timezone east of UTC.
+    return Number.isNaN(value.getTime()) ? null : toIsoLocal(value)
   }
 
   if (format === 'excel-serial' || typeof value === 'number') {
@@ -185,7 +186,7 @@ export function normalizeCurrency(value: unknown): string | null {
   const raw = String(value).trim()
   if (!raw) return null
   const lower = raw.toLowerCase()
-  if (CURRENCY_SYMBOLS[lower]) return CURRENCY_SYMBOLS[lower]
+  if (Object.hasOwn(CURRENCY_SYMBOLS, lower)) return CURRENCY_SYMBOLS[lower]
   // already a 3-letter code?
   const m = raw.match(/[A-Za-z]{3}/)
   if (m) return m[0].toUpperCase()

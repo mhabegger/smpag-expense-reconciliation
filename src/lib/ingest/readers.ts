@@ -51,9 +51,15 @@ export function matrixToRecords(
   headerRowIndex: number,
 ): { headers: string[]; records: RawRow[] } {
   const headerRaw = matrix[headerRowIndex] ?? []
+  const seen = new Map<string, number>()
   const headers = headerRaw.map((h, i) => {
     const s = String(h ?? '').trim()
-    return s === '' ? `Column ${i + 1}` : s
+    const name = s === '' ? `Column ${i + 1}` : s
+    // disambiguate duplicate headers (banks emit e.g. two "Amount" columns) —
+    // rec[name] would silently keep only the last one
+    const n = (seen.get(name) ?? 0) + 1
+    seen.set(name, n)
+    return n === 1 ? name : `${name} (${n})`
   })
   const records: RawRow[] = []
   for (let r = headerRowIndex + 1; r < matrix.length; r++) {

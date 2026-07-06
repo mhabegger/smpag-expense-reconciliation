@@ -33,6 +33,7 @@ function deriveDirection(
   signedValue: number,
   row: RawRow,
   o: MappingOptions,
+  errors: string[],
 ): { direction: Direction; magnitude: number } {
   const conv = o.signConvention ?? 'signed'
   let direction: Direction
@@ -46,13 +47,24 @@ function deriveDirection(
       const indicator = o.debitCreditColumn
         ? str(row[o.debitCreditColumn])?.toLowerCase()
         : null
+      // Exact token match — substring matching classified "credit" as debit
+      // (contains "d") and "Gutschrift" as debit (contains "s").
       const debitVals = (o.debitValues ?? ['debit', 'd', 'soll', 's']).map((v) =>
         v.toLowerCase(),
       )
-      direction =
-        indicator && debitVals.some((d) => indicator.includes(d))
-          ? 'debit'
-          : 'credit'
+      const creditVals = (
+        o.creditValues ?? ['credit', 'c', 'haben', 'h', 'gutschrift']
+      ).map((v) => v.toLowerCase())
+      if (indicator && debitVals.includes(indicator)) {
+        direction = 'debit'
+      } else if (indicator && creditVals.includes(indicator)) {
+        direction = 'credit'
+      } else {
+        direction = 'credit'
+        errors.push(
+          `unknown debit/credit indicator${indicator ? ` "${indicator}"` : ''}`,
+        )
+      }
       break
     }
     case 'signed':
@@ -145,7 +157,7 @@ export function mapRowsToCanonical(
         direction = options.defaultDirection ?? 'debit'
         magnitude = 0
       } else {
-        const r = deriveDirection(signedNumber, row, options)
+        const r = deriveDirection(signedNumber, row, options, errors)
         direction = r.direction
         magnitude = r.magnitude
       }

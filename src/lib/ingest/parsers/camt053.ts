@@ -17,11 +17,24 @@ function text(v: unknown): string | null {
   return s === '' ? null : s
 }
 
+/** A reference, treating the ubiquitous "NOTPROVIDED" placeholder as absent —
+ * a shared placeholder ref makes same-day same-amount rows hash identically
+ * and the dedup silently drops the second one. */
+function refText(v: unknown): string | null {
+  const s = text(v)
+  if (!s || s.toUpperCase() === 'NOTPROVIDED') return null
+  return s
+}
+
 /** Parse an ISO 20022 camt.053 (or camt.052) bank statement XML. */
 export function parseCamt053(xml: string): ParseResult {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
+    // keep tag values as strings: numeric coercion turns reference ids like
+    // "001234" into 1234 (leading zeros lost); amounts are converted
+    // explicitly via Number() below
+    parseTagValue: false,
     isArray: (name) =>
       ['Stmt', 'Rpt', 'Ntry', 'NtryDtls', 'TxDtls', 'Ustrd'].includes(name),
   })
@@ -65,7 +78,7 @@ export function parseCamt053(xml: string): ParseResult {
             valueDate,
             description:
               text(ntry?.AddtlNtryInf) ?? text(ntry?.NtryRef) ?? null,
-            reference: text(ntry?.AcctSvcrRef) ?? text(ntry?.NtryRef),
+            reference: refText(ntry?.AcctSvcrRef) ?? refText(ntry?.NtryRef),
             counterparty: null,
             origAmount: null,
             origCcy: null,
@@ -75,6 +88,41 @@ export function parseCamt053(xml: string): ParseResult {
           }),
         )
         continue
+      }
+
+      // a batch entry (several TxDtls) is only splittable when EVERY detail
+      // carries its own amount in the entry currency — otherwise each row
+      // would repeat the full entry amount, inflating totals N×
+      if (txDetailsList.length > 1) {
+        const splittable = txDetailsList.every((tx) => {
+          const n = tx?.AmtDtls?.TxAmt?.Amt
+          return n && (n['@_Ccy'] as string) === ccy
+        })
+        if (!splittable) {
+          warnings.push(
+            `Batch entry on ${valueDate ?? bookingDate ?? '?'} (${ccy} ${magnitude}) has ${txDetailsList.length} transactions without per-transaction amounts — imported as one entry-level row`,
+          )
+          rows.push(
+            buildRow({
+              magnitude,
+              ccy,
+              direction,
+              txDate: valueDate ?? bookingDate ?? '',
+              bookingDate,
+              valueDate,
+              description:
+                text(ntry?.AddtlNtryInf) ?? text(ntry?.NtryRef) ?? null,
+              reference: refText(ntry?.AcctSvcrRef) ?? refText(ntry?.NtryRef),
+              counterparty: null,
+              origAmount: null,
+              origCcy: null,
+              fxRate: null,
+              status,
+              raw: ntry,
+            }),
+          )
+          continue
+        }
       }
 
       for (const tx of txDetailsList) {
@@ -101,19 +149,27 @@ export function parseCamt053(xml: string): ParseResult {
             ? Number(text(txAmtNode) ?? String(magnitude))
             : magnitude
 
+        // mixed batches can carry a per-transaction direction
+        const txCdtDbt = text(tx?.CdtDbtInd)
+        const txDirection = txCdtDbt
+          ? txCdtDbt.startsWith('CRDT')
+            ? ('credit' as const)
+            : ('debit' as const)
+          : direction
+
         rows.push(
           buildRow({
             magnitude: perTxMagnitude,
             ccy,
-            direction,
+            direction: txDirection,
             txDate: valueDate ?? bookingDate ?? '',
             bookingDate,
             valueDate,
             description: ustrd || text(ntry?.AddtlNtryInf) || null,
             reference:
-              text(tx?.Refs?.EndToEndId) ??
-              text(tx?.Refs?.TxId) ??
-              text(ntry?.AcctSvcrRef),
+              refText(tx?.Refs?.EndToEndId) ??
+              refText(tx?.Refs?.TxId) ??
+              refText(ntry?.AcctSvcrRef),
             counterparty,
             origAmount: origMagnitude,
             origCcy: srcCcy && srcCcy !== ccy ? srcCcy : null,

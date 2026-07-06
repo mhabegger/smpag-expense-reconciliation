@@ -6,6 +6,7 @@ import {
   parseNumberFlexible,
   splitAmountCurrency,
 } from './transforms.ts'
+import { mapRowsToCanonical } from './parsers/tabular.ts'
 
 describe('parseNumberFlexible', () => {
   it('parses Swiss apostrophe thousands', () => {
@@ -46,6 +47,16 @@ describe('parseDateFlexible', () => {
     expect(parseDateFlexible(46196, 'excel-serial')).toBe(excelSerialToIso(46196))
     expect(excelSerialToIso(46196)).toMatch(/^2026-/)
   })
+  it('keeps datetime serials on the same calendar day', () => {
+    // 45992.75 = 2025-12-01 18:00 — the fraction is time of day, not rounding
+    expect(excelSerialToIso(45992.75)).toBe(excelSerialToIso(45992))
+    expect(excelSerialToIso(45992)).toBe('2025-12-01')
+  })
+  it('uses the local calendar day for Date objects (xlsx cellDates)', () => {
+    // xlsx builds Dates at local midnight; toISOString() would report the
+    // previous day for any timezone east of UTC
+    expect(parseDateFlexible(new Date(2025, 11, 1))).toBe('2025-12-01')
+  })
 })
 
 describe('splitAmountCurrency', () => {
@@ -68,5 +79,33 @@ describe('normalizeCurrency', () => {
     expect(normalizeCurrency('Fr.')).toBe('CHF')
     expect(normalizeCurrency('€')).toBe('EUR')
     expect(normalizeCurrency('usd')).toBe('USD')
+  })
+  it('does not fall for prototype keys', () => {
+    expect(normalizeCurrency('constructor')).not.toBe('[object Object]')
+  })
+})
+
+describe('mapRowsToCanonical — debit/credit indicator', () => {
+  const fieldMap = { txDate: 'Date', amount: 'Amount' }
+  const options = {
+    signConvention: 'debit_credit_indicator' as const,
+    debitCreditColumn: 'DC',
+    defaultCurrency: 'CHF',
+  }
+  const row = (dc: string) => ({ Date: '2026-01-05', Amount: '10.00', DC: dc })
+
+  it('matches indicator tokens exactly, not by substring', () => {
+    const [debit, credit, gutschrift] = mapRowsToCanonical(
+      [row('Debit'), row('Credit'), row('Gutschrift')],
+      fieldMap,
+      options,
+    )
+    expect(debit.direction).toBe('debit') // exact token
+    expect(credit.direction).toBe('credit') // "credit" contains "d" — must NOT be debit
+    expect(gutschrift.direction).toBe('credit') // contains "s" — must NOT be debit
+  })
+  it('flags unknown indicator values', () => {
+    const [r] = mapRowsToCanonical([row('???')], fieldMap, options)
+    expect(r.errors).toContain('unknown debit/credit indicator "???"')
   })
 })

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '#/db/client.ts'
 import { accounts, auditLog, importBatches, transactions } from '#/db/schema.ts'
 import type { Ledger, NewTransaction } from '#/db/types.ts'
@@ -13,6 +13,7 @@ import {
 import { hashRows } from '#/lib/ingest/dedup.ts'
 import { analyzeFile, periodOf } from '#/lib/ingest/pipeline.ts'
 import type { CanonicalRow, FieldMap, MappingOptions } from '#/lib/ingest/types.ts'
+import { fromMinor } from '#/lib/money.ts'
 import { getConfig } from '#/lib/matching/engine.ts'
 import { normalizeMerchant } from '#/lib/matching/similarity.ts'
 
@@ -26,7 +27,14 @@ export interface CommitParams {
 }
 
 export type CommitResult =
-  | { ok: true; batchId: string; inserted: number; duplicates: number; rowCount: number }
+  | {
+      ok: true
+      batchId: string
+      inserted: number
+      duplicates: number
+      skipped: number
+      rowCount: number
+    }
   | { ok: false; error: string; batchId?: string }
 
 function chfEquivOf(row: CanonicalRow, rateMap: RateMap): number | null {
@@ -52,7 +60,12 @@ export async function commitFile(params: CommitParams): Promise<CommitResult> {
   const dup = db
     .select()
     .from(importBatches)
-    .where(eq(importBatches.fileHash, fileHash))
+    .where(
+      and(
+        eq(importBatches.fileHash, fileHash),
+        eq(importBatches.status, 'committed'),
+      ),
+    )
     .get()
   if (dup) {
     return {
@@ -67,9 +80,17 @@ export async function commitFile(params: CommitParams): Promise<CommitResult> {
     fieldMap: params.fieldMap,
     options: params.options,
   })
-  const rows = result.rows
-  if (!rows || rows.length === 0) {
+  const allRows = result.rows
+  if (!allRows || allRows.length === 0) {
     return { ok: false, error: 'No rows parsed from file.' }
+  }
+
+  // never commit rows that failed to parse: an 'unparseable amount' row would
+  // be stored as 0.00 on date '' and silently counted as a success
+  const rows = allRows.filter((r) => r.errors.length === 0)
+  const skipped = allRows.length - rows.length
+  if (rows.length === 0) {
+    return { ok: false, error: `All ${allRows.length} rows have parse errors.` }
   }
 
   const account = db
@@ -104,7 +125,11 @@ export async function commitFile(params: CommitParams): Promise<CommitResult> {
       r.amount &&
       r.originalCurrency !== r.currency
     ) {
-      const rate = Math.abs(r.amount) / Math.abs(r.originalAmount)
+      // ratio of MAJOR units — a minor-unit ratio is off by 10^Δdecimals for
+      // 0/3-decimal currencies (JPY 100x, BHD 10x)
+      const rate =
+        fromMinor(Math.abs(r.amount), r.currency) /
+        fromMinor(Math.abs(r.originalAmount), r.originalCurrency)
       if (Number.isFinite(rate) && rate > 0)
         storeRate(r.txDate, r.originalCurrency, r.currency, rate, 'card')
     }
@@ -188,11 +213,11 @@ export async function commitFile(params: CommitParams): Promise<CommitResult> {
         entity: 'import_batch',
         entityId: batch.id,
         action: 'commit_import',
-        detail: { fileName, inserted, duplicates },
+        detail: { fileName, inserted, duplicates, skipped },
       })
       .run()
-    return { batchId: batch.id, inserted, duplicates, rowCount: rows.length }
+    return { batchId: batch.id, inserted, duplicates, rowCount: allRows.length }
   })
 
-  return { ok: true, ...summary }
+  return { ok: true, skipped, ...summary }
 }

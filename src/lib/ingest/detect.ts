@@ -64,8 +64,12 @@ export function detectKind(buf: Buffer, fileName = ''): FileKind {
       return 'excel'
   }
 
-  // sniff text head
-  const head = buf.subarray(0, 8192).toString('latin1').replace(/^﻿/, '')
+  // sniff text head — skip a UTF-8 BOM on the raw bytes (a latin1 decode
+  // turns it into "ï»¿", which a ﻿ strip can never match)
+  let body = buf
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf)
+    body = buf.subarray(3)
+  const head = body.subarray(0, 8192).toString('latin1')
   const trimmed = head.replace(/^\s+/, '')
 
   if (trimmed.startsWith('<')) {
