@@ -97,9 +97,13 @@ function Reconcile() {
   const reviewed = order.filter((i) => !needsReview(i)).length
 
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ['reconcileItem', id] })
+    // prefix-invalidate all items: confirming a grouped reimbursement
+    // updates sibling anchors, not just the current one
+    qc.invalidateQueries({ queryKey: ['reconcileItem'] })
     qc.invalidateQueries({ queryKey: ['reconQueue'] })
     qc.invalidateQueries({ queryKey: ['dashboard'] })
+    qc.invalidateQueries({ queryKey: ['transactions'] })
+    qc.invalidateQueries({ queryKey: ['transaction'] })
   }
 
   const goNext = () =>
@@ -212,25 +216,45 @@ function Reconcile() {
 
   useEffect(() => setFocus(0), [id])
 
+  // keep the focused index valid when candidates are removed (e.g. after `x`)
+  useEffect(() => {
+    setFocus((f) => Math.max(0, Math.min(f, allCands.length - 1)))
+  }, [allCands.length])
+
   // keyboard
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      const el = e.target as HTMLElement | null
+      const tag = el?.tagName
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        tag === 'BUTTON' ||
+        el?.isContentEditable ||
+        el?.closest('[role="dialog"]')
+      )
+        return
+      if (infoOpen) return
+      // ignore shortcuts while a mutation is in flight — a second Enter/x
+      // would double-submit against stale candidate indices
+      if (classify.isPending || confirm.isPending || reject.isPending || pending.isPending)
+        return
       const k = e.key.toLowerCase()
       if (k === 'd') classify.mutate('deliver_media')
       else if (k === 's') classify.mutate('swiss_media_partners')
       else if (k === 'f') classify.mutate('private')
-      else if (k === 'n') goNext()
-      else if (k === 'p') goPrev()
+      else if (k === 'n' || e.key === 'ArrowRight') goNext()
+      else if (k === 'p' || e.key === 'ArrowLeft') goPrev()
       else if (k === 'l') pending.mutate(true)
       else if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setFocus((f) => Math.min(f + 1, allCands.length - 1))
+        setFocus((f) => Math.min(f + 1, Math.max(allCands.length - 1, 0)))
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         setFocus((f) => Math.max(f - 1, 0))
       } else if (e.key === 'Enter') {
+        e.preventDefault()
         const c = allCands[focus]
         if (c) confirm.mutate(c.id)
       } else if (k === 'x') {
@@ -241,7 +265,18 @@ function Reconcile() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allCands, focus, id, nextId, prevId])
+  }, [
+    allCands,
+    focus,
+    id,
+    nextId,
+    prevId,
+    infoOpen,
+    classify.isPending,
+    confirm.isPending,
+    reject.isPending,
+    pending.isPending,
+  ])
 
   if (isLoading) {
     return (
@@ -451,6 +486,7 @@ function Reconcile() {
             <span className="font-mono">Enter</span> accept ·{' '}
             <span className="font-mono">x</span> reject ·{' '}
             <span className="font-mono">l</span> flag pending ·{' '}
+            <span className="font-mono">←/→</span> or{' '}
             <span className="font-mono">p/n</span> prev/next
           </div>
         </div>

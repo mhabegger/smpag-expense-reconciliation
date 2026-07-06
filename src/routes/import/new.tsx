@@ -96,6 +96,10 @@ function NewImport() {
         `Imported ${res.inserted} rows` +
           (res.duplicates ? ` (${res.duplicates} duplicates skipped)` : ''),
       )
+      if (res.skipped)
+        toast.warning(
+          `${res.skipped} row(s) with parse errors were NOT imported — check the preview's error count`,
+        )
       qc.invalidateQueries({ queryKey: ['batches'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
       qc.invalidateQueries({ queryKey: ['transactions'] })
@@ -113,7 +117,11 @@ function NewImport() {
   const meta = preview?.meta
   const stats = preview?.stats
   const canCommit =
-    !!preview && !preview.needsMapping && !!accountId && (stats?.rowCount ?? 0) > 0
+    !!preview &&
+    !preview.needsMapping &&
+    !preview.alreadyImported &&
+    !!accountId &&
+    (stats?.rowCount ?? 0) > 0
 
   return (
     <div>

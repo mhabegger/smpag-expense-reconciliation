@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   bulkClassifyByFilter,
@@ -95,9 +100,11 @@ function Transactions() {
     setPage(0)
   }
 
-  const { data } = useQuery({
+  const { data, isFetching } = useQuery({
     queryKey: ['transactions', filter],
     queryFn: () => listTransactions({ data: filter }),
+    // keep showing the previous page while a keystroke/filter change refetches
+    placeholderData: keepPreviousData,
   })
   const { data: accounts } = useQuery({
     queryKey: ['accounts'],
@@ -150,6 +157,7 @@ function Transactions() {
     const h = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (bulkAssign.isPending) return
       const k = e.key.toLowerCase()
       if (k === 's') bulkAssign.mutate('swiss_media_partners')
       else if (k === 'd') bulkAssign.mutate('deliver_media')
@@ -157,7 +165,7 @@ function Transactions() {
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [bulkOpen, bulkAssign])
+  }, [bulkOpen, bulkAssign.isPending, bulkAssign.mutate])
 
   const total = data?.total ?? 0
   const rows = data?.rows ?? []
@@ -375,7 +383,7 @@ function Transactions() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {rows.length === 0 && (
+                  {rows.length === 0 && !isFetching && (
                     <TableRow>
                       <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
                         No transactions. Import a statement first.

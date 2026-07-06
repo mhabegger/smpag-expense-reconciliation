@@ -39,6 +39,8 @@ function ImportList() {
       )
       qc.invalidateQueries({ queryKey: ['batches'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
+      qc.invalidateQueries({ queryKey: ['transactions'] })
+      qc.invalidateQueries({ queryKey: ['reconQueue'] })
       router.invalidate()
     },
   })
@@ -118,7 +120,14 @@ function ImportList() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => revert.mutate(b.id)}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  `Revert "${b.fileName}"? This removes its ${b.insertedCount} imported rows (matched rows are kept).`,
+                                )
+                              )
+                                revert.mutate(b.id)
+                            }}
                             disabled={revert.isPending}
                           >
                             <Trash2 className="size-4" />
