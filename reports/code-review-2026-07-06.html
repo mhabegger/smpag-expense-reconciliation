@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Review — Expense Reconciliation — 2026-07-06</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d212b; --text: #e6e8ee;
+    --muted: #9aa3b2; --border: #2a2f3a; --accent: #7aa2f7;
+    --high: #f7768e; --med: #e0af68; --low: #9ece6a; --fixed: #73daca;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f7f8fa; --panel: #ffffff; --panel2: #f1f3f7; --text: #1a1d24;
+      --muted: #5b6472; --border: #dfe3ea; --accent: #2b5fd9;
+      --high: #c2334d; --med: #a06b0a; --low: #3e7a1e; --fixed: #0e8a76;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.6 system-ui, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 40px 28px 80px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 48px 0 12px; padding-top: 20px; border-top: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 28px 0 8px; }
+  p, li { color: var(--text); }
+  .sub { color: var(--muted); margin-bottom: 28px; }
+  .muted { color: var(--muted); }
+  code, .file { font-family: var(--mono); font-size: 13px; background: var(--panel2);
+    border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; white-space: nowrap; }
+  .file { color: var(--accent); }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; }
+  .badge { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 8px;
+    border-radius: 999px; letter-spacing: .03em; white-space: nowrap; }
+  .b-high  { color: var(--high);  border: 1px solid var(--high); }
+  .b-med   { color: var(--med);   border: 1px solid var(--med); }
+  .b-low   { color: var(--low);   border: 1px solid var(--low); }
+  .b-fixed { color: var(--fixed); border: 1px solid var(--fixed); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px; margin: 14px 0; }
+  .card h4 { margin: 0 0 6px; font-size: 15px; }
+  .card p { margin: 6px 0; font-size: 14px; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 16px 0; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .stat .n { font-size: 26px; font-weight: 700; }
+  .stat .l { color: var(--muted); font-size: 12.5px; }
+  .toc { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 20px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc li { margin: 2px 0; }
+  .warn { border-left: 3px solid var(--high); background: var(--panel); padding: 12px 16px;
+    border-radius: 6px; margin: 16px 0; }
+  ul { padding-left: 22px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Code Review — Expense Reconciliation</h1>
+<p class="sub">2026-07-06 · full-repo review and fix pass (ingest pipeline, matching engine, server layer, routes/UI, tooling) · four independent subsystem reviews, consolidated, verified, and largely applied the same day</p>
+
+<div class="cols">
+  <div class="stat"><div class="n">40+</div><div class="l">fixes applied &amp; verified (typecheck, 32 tests, migration, page smoke tests)</div></div>
+  <div class="stat"><div class="n">9 / 9</div><div class="l">high-severity bugs fixed, incl. all financial-correctness issues</div></div>
+  <div class="stat"><div class="n">1</div><div class="l">data decision pending: reset + re-import vs. migrate existing rows</div></div>
+  <div class="stat"><div class="n">8</div><div class="l">larger improvements outlined for planning</div></div>
+</div>
+
+<div class="toc">
+  <b>Contents</b>
+  <ol>
+    <li><a href="#caveat">Action needed: existing imported data</a></li>
+    <li><a href="#fixed-high">Fixed: financial-correctness bugs</a></li>
+    <li><a href="#fixed-ux">Fixed: interaction &amp; UX</a></li>
+    <li><a href="#fixed-hygiene">Fixed: hardening &amp; hygiene</a></li>
+    <li><a href="#behavior">Visible behavior changes to be aware of</a></li>
+    <li><a href="#remaining">Remaining findings (not applied)</a></li>
+    <li><a href="#larger">Larger improvements worth planning</a></li>
+    <li><a href="#tests">Test-coverage gaps</a></li>
+    <li><a href="#good">What the codebase does well</a></li>
+  </ol>
+</div>
+
+<h2 id="caveat">1 · Action needed: existing imported data</h2>
+<div class="warn">
+  <p><b>Rows already in the database were imported with two now-fixed bugs</b>, and the dedup row-hash bakes both in:</p>
+  <ul>
+    <li><b>Excel dates one day early</b> — every date from SwissCard, CornerCard, and both accounting <code>.xlsx</code> exports.</li>
+    <li><b>camt.053 <code>NOTPROVIDED</code> references</b> — previously stored as a real reference; now treated as absent (they made distinct same-day, same-amount rows hash identically, silently dropping the second one).</li>
+  </ul>
+  <p>Because the fixes change the computed row hashes, <b>re-importing previously imported files will duplicate rows instead of skipping them</b>.</p>
+  <p><b>Recommendation: <code>pnpm db:reset</code> and re-import all statements.</b> Matching decisions were made against shifted dates anyway, and a clean re-import also recovers any camt rows the old dedup silently dropped. Alternative if you want to keep confirmations: a one-off migration that shifts Excel-sourced dates +1 day and rehashes — say the word and I'll write it. Until decided, avoid re-importing old files.</p>
+</div>
+
+<h2 id="fixed-high">2 · Fixed: financial-correctness bugs</h2>
+<p>All applied, typechecked, tested (32/32), and smoke-tested against the real database. Where a change alters matching output, that's the point — the previous output was wrong.</p>
+
+<table>
+  <tr><th></th><th>Fix</th><th>Where</th></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>Excel dates imported one day early.</b> <code>xlsx</code> builds Dates in local time; <code>toISOString()</code> shifted every date-formatted cell back a day for any timezone east of UTC. Also: datetime serials no longer round to the next day (<code>Math.floor</code>, not <code>round</code>).</td>
+    <td class="file">src/lib/ingest/transforms.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>Grouped-reimbursement search window was inverted</b> — bank credits were only searched 5 days past the expense although the design reimburses up to 60 days of prior expenses. Most grouped matches could never be suggested. Two-line window swap; re-run matching to see the effect.</td>
+    <td class="file">src/lib/matching/engine.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>FX cache never refreshed.</b> One ancient rate suppressed fetching forever and carried forward for months. A cached rate now only counts if it's within 5 days of the requested date (covers ECB weekends/holidays).</td>
+    <td class="file">src/lib/fx/rates.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>Missing-FX fallback compared raw foreign amounts at same-currency tolerance</b> — a 100.00 USD charge scored a perfect match against a 100.00 CHF entry. Candidates without a derivable conversion are now skipped instead of faked. Also fixed: cross-rates now route via CHF (the hub actually populated) — USD↔EUR pairs were previously unconvertible even though both rates were cached.</td>
+    <td class="file">src/lib/matching/engine.ts · rates.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>The same accounting entry / bank credit could be confirmed against two different expenses</b> (candidates are a cache; confirmation didn't invalidate siblings). <code>confirmCandidate</code> now re-checks inside its transaction and returns a clear error; it also aborts instead of recording raw foreign minor units as a bank-currency amount when an FX rate is missing, and no longer crashes on dangling candidate ids.</td>
+    <td class="file">src/server/matching.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>Dismissed candidates resurfaced on every matching run.</b> Re-runs now filter new suggestions against previously dismissed pairs (including group signatures), so rejections stick.</td>
+    <td class="file">src/lib/matching/engine.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>Revert was broken end-to-end</b>: FK constraint crashes for any transaction that ever had candidates or anchored a group, half-applied state on failure, batches marked reverted while rows survived, and reverted files permanently blocked from re-import (both in code and by a DB unique index). Now: transactional, FK-safe deletion order, "used" check covers anchors too, status only set when fully reverted, duplicate checks are status-aware, and the unique index was replaced by a plain index (migration <code>0004</code>, applied).</td>
+    <td class="file">src/server/imports.ts · commit.ts · schema.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>Rows with parse errors were committed silently</b> as 0.00 on date "". Errored rows are now skipped, reported in the result and as a warning toast, and an all-errors file refuses to commit. The debit/credit indicator rewrite (below) feeds this same path.</td>
+    <td class="file">src/lib/ingest/commit.ts · import/new.tsx</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>Debit/credit indicators matched by substring</b> — <code>"credit"</code> contains <code>"d"</code> → classified debit; <code>"Gutschrift"</code> contains <code>"s"</code> → debit. Now exact-token matching, <code>creditValues</code> honored (was declared but never read), unknown values flagged as row errors. Locked in with regression tests.</td>
+    <td class="file">src/lib/ingest/parsers/tabular.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>camt.053 batch entries could multiply amounts N×</b> (each of N transaction details repeated the full entry amount when per-tx amounts were missing) — now imported as one entry-level row with a warning; per-transaction direction (<code>CdtDbtInd</code>) honored for mixed batches; <code>NOTPROVIDED</code> refs treated as absent; XML numeric coercion disabled so reference ids keep leading zeros.</td>
+    <td class="file">src/lib/ingest/parsers/camt053.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>Dashboard summed foreign currency as CHF</b> when no rate was stored (a literal no-op ternary). Unconvertible amounts now count 0 and <code>totals.missingFx</code> reports them. Also: derived card FX rates were a ratio of minor units — wrong by 100× for JPY, 10× for BHD-class currencies; now computed on major units.</td>
+    <td class="file">src/server/dashboard.ts · commit.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>Group subsets found with 2% tolerance but scored at 0.5%</b> — subsets deviating 1–2% were found and silently zeroed. Scoring now uses the cross-currency flag of the actual members. Also: the merchant-similarity substring bonus (0.85 floor) no longer fires for substrings shorter than 4 chars (<code>"bp"</code> matched everything containing those letters).</td>
+    <td class="file">src/lib/matching/engine.ts · similarity.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td><b>BOM'd camt.053 files were misdetected as CSV</b> (the BOM strip ran after a latin1 decode and could never match). Duplicate column headers no longer silently overwrite each other (<code>Amount</code>, <code>Amount (2)</code>). Prototype-chain lookup in currency normalization guarded.</td>
+    <td class="file">src/lib/ingest/detect.ts · readers.ts · transforms.ts</td></tr>
+</table>
+
+<h2 id="fixed-ux">3 · Fixed: interaction &amp; UX</h2>
+<table>
+  <tr><th></th><th>Fix</th><th>Where</th></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td>Wizard keyboard shortcuts no longer fire while a button or dialog has focus (Enter was triggering both the focused button and "confirm candidate"); shortcuts no-op while a mutation is in flight (double-Enter could double-confirm); focused index is clamped when the candidate list shrinks; <b>←/→ prev/next implemented</b> (README documented it; only p/n existed).</td>
+    <td class="file">src/routes/reconcile/$id.tsx</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td>Failed mutations were silent almost everywhere — a global <code>MutationCache.onError</code> now toasts every failure.</td>
+    <td class="file">src/integrations/tanstack-query/root-provider.tsx</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td>Transactions table no longer flashes "No transactions" on every search keystroke (<code>keepPreviousData</code> + fetch-aware empty state); bulk-assign dialog hotkeys guard against double-fire.</td>
+    <td class="file">src/routes/transactions/index.tsx</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td>Confirming a grouped reimbursement now refreshes sibling items and the transactions caches (prefix invalidation) — previously visited group members kept stale data.</td>
+    <td class="file">src/routes/reconcile/$id.tsx</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td>Import revert — the only destructive one-click action — now asks for confirmation and invalidates the transactions/queue caches; commit button disabled for already-imported files; parse-error skips surfaced as a warning toast.</td>
+    <td class="file">src/routes/import/index.tsx · new.tsx</td></tr>
+</table>
+
+<h2 id="fixed-hygiene">4 · Fixed: hardening &amp; hygiene</h2>
+<table>
+  <tr><th></th><th>Fix</th><th>Where</th></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td>Nine <code>@tanstack/*</code> deps and <code>nitro-nightly</code> pinned (were <code>"latest"</code>); five unused deps removed (<code>natural</code>, <code>@faker-js/faker</code>, <code>@tanstack/react-form</code>, <code>@tanstack/match-sorter-utils</code>, <code>next-themes</code>); vestigial <code>@/*</code> alias dropped.</td>
+    <td class="file">package.json · tsconfig.json</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td>Runtime zod validation on all previously passthrough-validated server functions (ids for confirm/reject/restore/revoke, revert, transaction/account lookups); upload size capped (~30 MB); LIKE search escapes <code>%</code>/<code>_</code>; reject/restore/note updates report whether a row actually changed.</td>
+    <td class="file">src/server/*</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td>Audit-log coverage extended to <code>revoke_group</code> and <code>revert_import</code>; <code>bulkClassifyByFilter</code> snapshots and updates atomically by id (undo set now exactly matches what was updated).</td>
+    <td class="file">src/server/matching.ts · imports.ts · transactions.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td>Matching run wrapped in one transaction (~100× faster inserts, crash-consistent); FX lookups bucketed by pair instead of scanning the whole rate table per conversion (was O(pairs × rows)); <code>merchant_norm</code> indexed for the wizard's two per-step history scans (migration applied); matching config merged per-section so old persisted configs can't wipe new defaults.</td>
+    <td class="file">engine.ts · rates.ts · schema.ts</td></tr>
+  <tr><td><span class="badge b-fixed">FIXED</span></td>
+    <td>Standalone <code>vitest.config.ts</code> (tests no longer boot devtools/nitro — kills the React CJS error noise, halves startup); scripts exit non-zero on failure; 5 regression tests added for the date/indicator fixes.</td>
+    <td class="file">vitest.config.ts · scripts/*</td></tr>
+</table>
+
+<h2 id="behavior">5 · Visible behavior changes to be aware of</h2>
+<ul>
+  <li><b>The reconcile queue's "open" filter now matches its badge.</b> Previously the filter showed every card debit with open status — 1,376 rows in your data, 1,368 of them unclassified — while the badge said 8. Both now use one definition: classified to a company but not fully reconciled. Unclassified items live under the "Unclassified" filter as before.</li>
+  <li><b>Matching output will change (for the better) on the next run</b>: grouped reimbursements are actually found now, stale FX rates refresh, dismissed pairs stay dismissed, and cross-currency candidates without a real rate disappear instead of showing fake perfect scores.</li>
+  <li><b>Confirming can now return a clear error</b> ("already matched", "no FX rate") instead of silently creating a second group — the toast tells you to re-run matching, which refreshes candidates.</li>
+  <li><b>Imports skip errored rows and say so</b> instead of committing zeros; camt.053 batch entries without per-transaction amounts import as one entry-level row with a warning.</li>
+</ul>
+
+<h2 id="remaining">6 · Remaining findings (not applied)</h2>
+<p>Deferred deliberately — each either needs a product decision, real-file verification, or belongs to a larger refactor.</p>
+<table>
+  <tr><th></th><th>Finding</th><th>Why deferred</th></tr>
+  <tr><td><span class="badge b-med">MED</span></td>
+    <td>Revolut fees: the <code>fee</code> field is declared but unconsumed, and Revolut's <code>Amount</code> excludes the fee — imported amounts differ from the true balance impact. (<span class="file">src/lib/ingest/types.ts</span>)</td>
+    <td>Product decision: fold fee into amount, or import it as a separate row?</td></tr>
+  <tr><td><span class="badge b-med">MED</span></td>
+    <td>Preset options (<code>delimiter</code>/<code>encoding</code>/<code>sheetName</code>/<code>headerRow</code>) are never applied — the table is read before preset resolution. (<span class="file">src/lib/ingest/pipeline.ts</span>)</td>
+    <td>Needs the detect → resolve → re-read restructure (§7.3).</td></tr>
+  <tr><td><span class="badge b-med">MED</span></td>
+    <td>Dedup occurrence <code>baseKey</code> omits fields the hash includes — overlapping files listing colliding rows in different order can re-import both. (<span class="file">src/lib/ingest/dedup.ts</span>)</td>
+    <td>Changes hash behavior — bundle with the §1 reset so identities change once, not twice.</td></tr>
+  <tr><td><span class="badge b-med">MED</span></td>
+    <td>CornerCard preset signature (<code>Date, Description, Card, Amount, Status</code>) is generic enough to hijack unrelated exports and invert their signs. (<span class="file">src/lib/ingest/presets.ts</span>)</td>
+    <td>Tightening needs verification against the real CornerCard sample so auto-detection keeps working.</td></tr>
+  <tr><td><span class="badge b-med">MED</span></td>
+    <td>Bulk-assign says "Assign all {total} results" but the server enforces card-only — with ledger "all"/"bank" the promised count is wrong. (<span class="file">src/routes/transactions/index.tsx</span>)</td>
+    <td>Wants a card-only count from the server, not just a label tweak.</td></tr>
+  <tr><td><span class="badge b-med">MED</span></td>
+    <td>Rapid file re-pick can race preview/base64 state so a commit could send file A's bytes under file B's name. (<span class="file">src/routes/import/new.tsx</span>)</td>
+    <td>Needs a small mutation-variables refactor; low likelihood in practice.</td></tr>
+  <tr><td><span class="badge b-low">LOW</span></td>
+    <td>CSV header row hardcoded to 0 (preamble lines break preset matching); <code>setTimeout(goNext, 150)</code> auto-advance races the refetch; wizard order ignores the queue filter; ambiguous <code>03/04/2025</code> dates silently read as dd/MM; dead <code>stale</code>/<code>fxRateUsed</code> columns; manual FX rates lose to newer Frankfurter rates; focused candidate not scrolled into view; devtools panels eagerly bundled.</td>
+    <td>Batch into a cleanup pass on request.</td></tr>
+</table>
+
+<h2 id="larger">7 · Larger improvements worth planning</h2>
+<ol>
+  <li><b>Candidate-cache invalidation model.</b> The double-match guard now blocks wrong confirmations, but stale candidates still linger until a re-run. Finish the design the schema anticipates (<code>stale</code>, <code>runId</code>): any confirm/revoke/import marks candidates referencing consumed transactions.</li>
+  <li><b>Dedup hash versioning.</b> Twice in this review a parser fix changed row identities (§1). Store a <code>hashVersion</code> on batches/transactions so future normalization changes can rehash instead of double-importing.</li>
+  <li><b>Preset-driven re-read.</b> Restructure <code>analyzeFile</code> to detect → resolve preset → read-with-preset-options → map, making preset delimiter/encoding/sheet/header settings effective and rescuing mis-sniffed files.</li>
+  <li><b>camt.053 golden fixtures.</b> Anonymized real Raiffeisen exports as checked-in test fixtures (multi-TxDtls batches, FX legs, reversals, counterparty fields). Every camt bug found here stemmed from untested structural variants.</li>
+  <li><b>URL-driven list state + wizard order.</b> Move filter/sort/page/search into <code>validateSearch</code> params (back-button-safe, shareable) and let the review wizard walk the same filtered set the queue page showed. Also: detect end-of-queue and navigate home with an "all reviewed" toast instead of stranding the user.</li>
+  <li><b>Push dashboard/queue aggregation into SQL.</b> Both endpoints load entire ledgers (including <code>rawPayload</code> JSON) and aggregate in JS; the wizard refetches the full queue after every action. A few <code>GROUP BY</code> queries and a lightweight ordered-id endpoint keep the hottest paths O(result).</li>
+  <li><b>Recon status as derived data.</b> <code>accountingLinked</code>/<code>bankLinked</code>/<code>reconStatus</code> are denormalized flags maintained from six call sites — easy to miss one. Consider a view or a single <code>recomputeAll()</code> after structural changes.</li>
+  <li><b>Tooling baseline.</b> No linter, formatter, or CI. Suggest Biome (one fast tool, minimal config) + a GitHub Actions workflow running <code>typecheck</code> / <code>test</code> / <code>build</code>. Cheap insurance for code moving financial numbers.</li>
+</ol>
+
+<h2 id="tests">8 · Test-coverage gaps</h2>
+<p>32 tests now cover the pure helpers plus regressions for the date/indicator fixes. Highest-risk untested surfaces, in priority order:</p>
+<ul>
+  <li><b><code>mapRowsToCanonical</code></b> — remaining sign conventions (<code>invertSign</code>, <code>two_columns</code>, <code>positive_is_debit</code>), currency-in-cell splitting, drop rules. This is where sign-inversion bugs live.</li>
+  <li><b>Engine window construction and candidate lifecycle</b> — extract the window/pool logic into pure functions and test them; the inverted group window would have been caught immediately. Include used-exclusion and dismissed filtering.</li>
+  <li><b><code>rates.ts</code></b> — staleness bound, carry-forward, inversion, CHF-hub cross rates, mixed-decimal <code>convertMinor</code>, <code>ensureChfRates</code> with a mocked fetch.</li>
+  <li><b>Dedup hashing</b> — occurrence semantics, duplicate references, re-import idempotency across overlapping files.</li>
+  <li><b>Parser fixtures</b> — camt.053 (batch entries, FX legs, leading-zero refs, <code>NOTPROVIDED</code>), MT942, Raiffeisen continuation merging, BOM'd files through <code>detectKind</code>.</li>
+  <li><b>Boundary cases</b> — <code>scoreAmountPair</code> at exactly <code>tol</code>/<code>2·tol</code>, <code>findSubsetSums</code> caps and no-solution, negative and 3-decimal amounts in <code>money.ts</code>.</li>
+</ul>
+
+<h2 id="good">9 · What the codebase does well</h2>
+<ul>
+  <li><b>Money as integer minor units everywhere</b> — amounts, CHF equivalents, matched amounts, tolerance math. No floating point in financial arithmetic; the single rounding point lives in <code>money.ts</code>.</li>
+  <li><b>UTC epoch math for calendar dates</b> in <code>date.ts</code> — immune to the DST off-by-one class of bugs (the Excel issue was at the xlsx boundary, not here).</li>
+  <li><b>Idempotent import core</b>: content-addressed file hash, per-row content hash with occurrence indexing that preserves legitimate same-day duplicates, all committed in one transaction with batch bookkeeping.</li>
+  <li><b>Bounded subset-sum</b>: descending sort + overshoot pruning + pool/size caps make grouped-match search worst-case ~22k nodes — no exponential blowup.</li>
+  <li><b>Correct TanStack Start patterns</b>: route loaders with <code>ensureQueryData</code> and shared query options, hierarchical query keys, invalidation instead of manual refetch, no <code>useEffect</code> data fetching anywhere.</li>
+  <li><b>The undo system</b> — compensating server calls with server-returned prior state for bulk operations, <code>useSyncExternalStore</code> for the badge, native text-undo respected in inputs.</li>
+  <li><b>DTO discipline</b>: <code>rawPayload</code> stripped from every client-bound row; note DB helpers split into a server-only module so they can't ride into the client bundle.</li>
+  <li><b>SQLite done right for a local app</b>: WAL, <code>foreign_keys = ON</code>, <code>busy_timeout</code>; user decisions preserved across matching re-runs (dismissals kept — and now actually honored — groups soft-revoked).</li>
+</ul>
+
+<p class="muted" style="margin-top:40px">Generated 2026-07-06 · all fixes verified with <code>pnpm typecheck</code>, <code>pnpm test</code> (32 passed), migration 0004 applied, and SSR smoke tests of every page against the local database.</p>
+
+</div>
+</body>
+</html>
