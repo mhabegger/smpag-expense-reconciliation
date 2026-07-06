@@ -9,11 +9,12 @@ export const setTransactionNote = createServerFn({ method: 'POST' })
     z.object({ id: z.string(), note: z.string() }).parse(d),
   )
   .handler(async ({ data }) => {
-    db.update(transactions)
+    const res = db
+      .update(transactions)
       .set({ note: data.note.trim() || null, updatedAt: new Date() })
       .where(eq(transactions.id, data.id))
       .run()
-    return { ok: true as const }
+    return { ok: res.changes > 0 }
   })
 
 export const setMerchantNote = createServerFn({ method: 'POST' })

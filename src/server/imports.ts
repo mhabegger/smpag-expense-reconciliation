@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto'
 import { createServerFn } from '@tanstack/react-start'
-import { desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '#/db/client.ts'
 import {
   accounts,
+  auditLog,
   importBatches,
+  matchCandidates,
   matchGroupMembers,
   matchGroups,
   transactions,
@@ -22,9 +24,12 @@ function sha256(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex')
 }
 
+// ~30 MB file → ~40 MB base64; statements are a few hundred KB
+const MAX_BASE64 = 40_000_000
+
 const previewInput = z.object({
   fileName: z.string(),
-  base64: z.string(),
+  base64: z.string().max(MAX_BASE64),
   presetKey: z.string().optional(),
   fieldMap: z.record(z.string(), z.string()).optional(),
   options: z.record(z.string(), z.unknown()).optional(),
@@ -41,10 +46,16 @@ export const previewImport = createServerFn({ method: 'POST' })
       options: data.options as never,
     })
 
+    // a reverted batch does not block re-import
     const existing = db
       .select()
       .from(importBatches)
-      .where(eq(importBatches.fileHash, fileHash))
+      .where(
+        and(
+          eq(importBatches.fileHash, fileHash),
+          eq(importBatches.status, 'committed'),
+        ),
+      )
       .get()
 
     const rows = result.rows
@@ -101,7 +112,7 @@ export const previewImport = createServerFn({ method: 'POST' })
 
 const commitInput = z.object({
   fileName: z.string(),
-  base64: z.string(),
+  base64: z.string().max(MAX_BASE64),
   accountId: z.string(),
   presetKey: z.string().optional(),
   fieldMap: z.record(z.string(), z.string()).optional(),
@@ -136,35 +147,87 @@ export const listBatches = createServerFn({ method: 'GET' }).handler(async () =>
 })
 
 export const revertImport = createServerFn({ method: 'POST' })
-  .validator((id: string) => id)
+  .validator((d: unknown) => z.string().min(1).parse(d))
   .handler(async ({ data: batchId }) => {
-    const usedRows = new Set(
-      db
-        .select({ txId: matchGroupMembers.txId })
-        .from(matchGroupMembers)
-        .innerJoin(matchGroups, eq(matchGroupMembers.groupId, matchGroups.id))
-        .where(isNull(matchGroups.revokedAt))
+    return db.transaction((tx) => {
+      // a transaction is in use if it participates in any non-revoked group —
+      // as a MEMBER (accounting/bank rows) or as the ANCHOR (card expenses)
+      const activeMembers = new Set(
+        tx
+          .select({ txId: matchGroupMembers.txId })
+          .from(matchGroupMembers)
+          .innerJoin(matchGroups, eq(matchGroupMembers.groupId, matchGroups.id))
+          .where(isNull(matchGroups.revokedAt))
+          .all()
+          .map((r) => r.txId),
+      )
+      const activeAnchors = new Set(
+        tx
+          .select({ anchorTxId: matchGroups.anchorTxId })
+          .from(matchGroups)
+          .where(isNull(matchGroups.revokedAt))
+          .all()
+          .map((r) => r.anchorTxId),
+      )
+
+      const rows = tx
+        .select({ id: transactions.id })
+        .from(transactions)
+        .where(eq(transactions.importBatchId, batchId))
         .all()
-        .map((r) => r.txId),
-    )
-    const rows = db
-      .select()
-      .from(transactions)
-      .where(eq(transactions.importBatchId, batchId))
-      .all()
-    let removed = 0
-    let blocked = 0
-    for (const r of rows) {
-      if (usedRows.has(r.id)) {
-        blocked++
-        continue
+      const ids = rows
+        .map((r) => r.id)
+        .filter((id) => !activeMembers.has(id) && !activeAnchors.has(id))
+      const blocked = rows.length - ids.length
+
+      if (ids.length > 0) {
+        // clear dependents first or the FK constraints reject the delete:
+        // candidates referencing these txs (either side), then revoked groups
+        // they anchor or belong to
+        tx.delete(matchCandidates)
+          .where(
+            or(
+              inArray(matchCandidates.anchorTxId, ids),
+              inArray(matchCandidates.candidateTxId, ids),
+            ),
+          )
+          .run()
+        const revokedGroupIds = tx
+          .select({ id: matchGroups.id })
+          .from(matchGroups)
+          .where(inArray(matchGroups.anchorTxId, ids))
+          .all()
+          .map((g) => g.id)
+        if (revokedGroupIds.length > 0) {
+          tx.delete(matchGroupMembers)
+            .where(inArray(matchGroupMembers.groupId, revokedGroupIds))
+            .run()
+          tx.delete(matchGroups)
+            .where(inArray(matchGroups.id, revokedGroupIds))
+            .run()
+        }
+        tx.delete(matchGroupMembers)
+          .where(inArray(matchGroupMembers.txId, ids))
+          .run()
+        tx.delete(transactions).where(inArray(transactions.id, ids)).run()
       }
-      db.delete(transactions).where(eq(transactions.id, r.id)).run()
-      removed++
-    }
-    db.update(importBatches)
-      .set({ status: 'reverted' })
-      .where(eq(importBatches.id, batchId))
-      .run()
-    return { removed, blockedByMatches: blocked }
+
+      // only mark reverted when nothing remains — a batch with surviving
+      // matched rows is still (partially) live
+      if (blocked === 0) {
+        tx.update(importBatches)
+          .set({ status: 'reverted' })
+          .where(eq(importBatches.id, batchId))
+          .run()
+      }
+      tx.insert(auditLog)
+        .values({
+          entity: 'import_batch',
+          entityId: batchId,
+          action: 'revert_import',
+          detail: { removed: ids.length, blockedByMatches: blocked },
+        })
+        .run()
+      return { removed: ids.length, blockedByMatches: blocked }
+    })
   })

@@ -151,7 +151,10 @@ export const importBatches = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [
-    uniqueIndex('import_batches_file_hash_uq').on(t.fileHash),
+    // NOT unique: a reverted batch keeps its row (audit trail) and the same
+    // file must be re-importable afterwards — the duplicate check in code
+    // only considers batches with status 'committed'
+    index('import_batches_file_hash_idx').on(t.fileHash),
     index('import_batches_account_idx').on(t.accountId),
   ],
 )
@@ -248,6 +251,8 @@ export const transactions = sqliteTable(
     index('transactions_class_idx').on(t.classification),
     index('transactions_recon_idx').on(t.reconStatus),
     index('transactions_account_idx').on(t.accountId),
+    // getReconcileItem scans merchant history twice per wizard step
+    index('transactions_merchant_norm_idx').on(t.merchantNorm),
   ],
 )
 

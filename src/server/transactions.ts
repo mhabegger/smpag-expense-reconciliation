@@ -1,13 +1,13 @@
 import { createServerFn } from '@tanstack/react-start'
 import {
   and,
+  type AnyColumn,
   asc,
   count,
   desc,
   eq,
   gte,
   inArray,
-  like,
   lte,
   or,
   type SQL,
@@ -95,7 +95,7 @@ export const listTransactions = createServerFn({ method: 'POST' })
   })
 
 export const getTransaction = createServerFn({ method: 'GET' })
-  .validator((id: string) => id)
+  .validator((d: unknown) => z.string().min(1).parse(d))
   .handler(async ({ data: id }) => {
     const tx = db
       .select()
@@ -205,12 +205,15 @@ function buildConds(
   if (f.dateFrom) conds.push(gte(transactions.txDate, f.dateFrom))
   if (f.dateTo) conds.push(lte(transactions.txDate, f.dateTo))
   if (f.search) {
-    const q = `%${f.search}%`
+    // escape LIKE wildcards so searching "100%" or "A_B" matches literally
+    const escaped = f.search.replace(/[\\%_]/g, '\\$&')
+    const q = `%${escaped}%`
+    const esc = (col: AnyColumn) => sql`${col} LIKE ${q} ESCAPE '\\'`
     const s = or(
-      like(transactions.merchant, q),
-      like(transactions.description, q),
-      like(transactions.counterparty, q),
-      like(transactions.reference, q),
+      esc(transactions.merchant),
+      esc(transactions.description),
+      esc(transactions.counterparty),
+      esc(transactions.reference),
     )
     if (s) conds.push(s)
   }
@@ -228,34 +231,40 @@ export const bulkClassifyByFilter = createServerFn({ method: 'POST' })
   .handler(async ({ data }) => {
     const conds = buildConds(data.filter, { cardOnly: true })
     const where = conds.length ? and(...conds) : undefined
-    const prev = db
-      .select({
-        id: transactions.id,
-        classification: transactions.classification,
-      })
-      .from(transactions)
-      .where(where)
-      .all()
-    const ids = prev.map((r) => r.id)
-    if (ids.length === 0) return { updated: 0, prev: [] as typeof prev }
-    db.update(transactions)
-      .set({
-        classification: data.classification,
-        classifiedAt: new Date(),
-        classificationSource: 'user',
-        updatedAt: new Date(),
-      })
-      .where(where)
-      .run()
+    // snapshot + update atomically, and update by the snapshot's ids rather
+    // than re-evaluating the filter — keeps the undo set exactly right
+    const { prev, ids } = db.transaction((tx) => {
+      const prev = tx
+        .select({
+          id: transactions.id,
+          classification: transactions.classification,
+        })
+        .from(transactions)
+        .where(where)
+        .all()
+      const ids = prev.map((r) => r.id)
+      if (ids.length > 0) {
+        tx.update(transactions)
+          .set({
+            classification: data.classification,
+            classifiedAt: new Date(),
+            classificationSource: 'user',
+            updatedAt: new Date(),
+          })
+          .where(inArray(transactions.id, ids))
+          .run()
+        tx.insert(auditLog)
+          .values({
+            entity: 'transaction',
+            entityId: 'bulk',
+            action: 'bulk_classify_by_filter',
+            detail: { classification: data.classification, count: ids.length },
+          })
+          .run()
+      }
+      return { prev, ids }
+    })
     for (const id of ids) recomputeAnchorStatus(id)
-    db.insert(auditLog)
-      .values({
-        entity: 'transaction',
-        entityId: 'bulk',
-        action: 'bulk_classify_by_filter',
-        detail: { classification: data.classification, count: ids.length },
-      })
-      .run()
     return { updated: ids.length, prev }
   })
 
