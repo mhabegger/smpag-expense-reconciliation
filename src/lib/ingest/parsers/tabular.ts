@@ -97,6 +97,11 @@ export function mapRowsToCanonical(
       const v = get(row, options.dropRowsWithoutField)
       if (v == null || String(v).trim() === '') continue
     }
+    // reverted/declined card authorisations never moved money
+    if (options.skipStatuses?.length) {
+      const st = String(get(row, 'statusText') ?? '').trim().toUpperCase()
+      if (options.skipStatuses.some((s) => s.toUpperCase() === st)) continue
+    }
 
     const errors: string[] = []
 

@@ -1,0 +1,9 @@
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  lightningcss: true
+minimumReleaseAgeExclude:
+  - crossws@0.4.17
+  - env-runner@0.3.10
+  - nitro-nightly@3.0.1-20261027-172659-6d3911d6
+  - srvx@1.0.8

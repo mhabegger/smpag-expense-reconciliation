@@ -65,6 +65,26 @@ pnpm tsx scripts/import_samples.ts
 
 `/data` and `/samples` are git-ignored.
 
+## Expense rules
+
+- **Home charging (company car):** one SMP Spesen document per month, every
+  month. Volkswagen (Elli) sends a monthly PDF; the claim is the kWh on it ×
+  that year's local electricity tariff. No card payment exists for these, so
+  the matcher treats titles with "Ladestrom" / "Volkswagen Group Charging" as
+  home charging and only expects the payout.
+- **Public charging in Switzerland** (Swisscharge, GoFast, … now JOYA) is
+  covered by SMP; submit each with the app receipt.
+- **Small recurring subscriptions** (Tello, locize) may be bundled into one
+  yearly summary document, filed in early January of the next year.
+- **Submitting:** upload receipts in Accounto's Spesen module (they arrive
+  flagged as Spesen). E-mailing them to the Accounto inbox books them as
+  company card, and each has to be switched by hand.
+- Company services and subscriptions on private cards: submit at any amount.
+  Day-to-day out-of-pocket items (coffee, lunch, taxi) under 50 CHF are
+  covered by the monthly lump sum — SwissMediaPartners only; deliver.media has
+  no lump sum, so a DM expense is either submitted or private. Card fees and interest are private, except
+  the SwissCard annual fee (company card, SMP pays it).
+
 ## Scripts
 
 - `pnpm dev` / `pnpm build` / `pnpm start` — develop / build / serve production

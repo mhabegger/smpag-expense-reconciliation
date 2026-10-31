@@ -58,7 +58,7 @@ export const getReconQueue = createServerFn({ method: 'POST' })
       .where(
         and(eq(transactions.ledger, 'card'), eq(transactions.direction, 'debit')),
       )
-      .orderBy(asc(transactions.classification), desc(transactions.txDate))
+      .orderBy(asc(transactions.txDate))
       .all()
 
     const items = all
@@ -99,7 +99,14 @@ export const getReconQueue = createServerFn({ method: 'POST' })
       pending: all.filter((t) => t.pending).length,
       open: all.filter(isOpen).length,
     }
-    return { items, counts }
+    // money not back yet: open company expenses without a payout (CHF minor units)
+    const owed = (cls: Transaction['classification']) =>
+      all
+        .filter((t) => isOpen(t) && !t.bankLinked && t.classification === cls)
+        .reduce((s, t) => s + Math.abs(t.chfEquiv ?? t.amount), 0)
+    const dm = owed('deliver_media')
+    const smp = owed('swiss_media_partners')
+    return { items, counts, outstanding: { total: dm + smp, dm, smp } }
   })
 
 function txById(ids: string[]): Map<string, Transaction> {

@@ -276,15 +276,26 @@ const bulkClassifyInput = z.object({
 export const bulkClassify = createServerFn({ method: 'POST' })
   .validator((d: unknown) => bulkClassifyInput.parse(d))
   .handler(async ({ data }) => {
-    db.update(transactions)
-      .set({
-        classification: data.classification,
-        classifiedAt: new Date(),
-        classificationSource: 'user',
-        updatedAt: new Date(),
-      })
-      .where(inArray(transactions.id, data.ids))
-      .run()
-    for (const id of data.ids) recomputeAnchorStatus(id)
+    // one commit instead of one per statement (WAL fsync per write)
+    db.transaction(() => {
+      db.update(transactions)
+        .set({
+          classification: data.classification,
+          classifiedAt: new Date(),
+          classificationSource: 'user',
+          updatedAt: new Date(),
+        })
+        .where(inArray(transactions.id, data.ids))
+        .run()
+      db.insert(auditLog)
+        .values({
+          entity: 'transaction',
+          entityId: 'bulk',
+          action: 'bulk_classify',
+          detail: { classification: data.classification, ids: data.ids },
+        })
+        .run()
+      for (const id of data.ids) recomputeAnchorStatus(id)
+    })
     return { updated: data.ids.length }
   })

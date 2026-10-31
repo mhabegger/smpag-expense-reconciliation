@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Check,
@@ -188,6 +188,34 @@ function Reconcile() {
           }),
       })
       invalidate()
+    },
+  })
+  // close an expense without a document or payout (e.g. old 2024 items):
+  // marks both legs "no match", which counts as reconciled
+  const acknowledge = useMutation({
+    mutationFn: async (value: boolean) => {
+      for (const leg of ['accounting', 'reimbursement'] as const)
+        await markNoMatch({ data: { anchorTxId: id, leg, value } })
+    },
+    onMutate: () => ({
+      prev: {
+        accounting: item?.tx.noAccountingMatch ?? false,
+        reimbursement: item?.tx.noBankMatch ?? false,
+      },
+    }),
+    onSuccess: (_d, value, ctx) => {
+      invalidate()
+      pushUndo({
+        label: value ? 'done' : 'reopen',
+        run: async () => {
+          for (const leg of ['accounting', 'reimbursement'] as const)
+            await markNoMatch({ data: { anchorTxId: id, leg, value: ctx!.prev[leg] } })
+        },
+      })
+      if (value) {
+        toast.success('Marked done — no further action')
+        setTimeout(goNext, 150)
+      }
     },
   })
   const pending = useMutation({
@@ -552,6 +580,28 @@ function Reconcile() {
                     <Clock className="size-4" /> Flag for later (l)
                   </Button>
                 )}
+                {tx.noAccountingMatch && tx.noBankMatch ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => acknowledge.mutate(false)}
+                    disabled={acknowledge.isPending}
+                  >
+                    <RotateCcw className="size-4" /> Reopen
+                  </Button>
+                ) : (
+                  tx.reconStatus !== 'matched' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => acknowledge.mutate(true)}
+                      disabled={acknowledge.isPending}
+                      title="Close this expense without a document or payout"
+                    >
+                      <Check className="size-4" /> Done, no further action
+                    </Button>
+                  )
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -868,21 +918,24 @@ function RelatedBookings({ related }: { related: Related[] }) {
           {related.map((r) => {
             const st = relatedStatus(r)
             return (
-              <li
-                key={r.id}
-                className="flex items-center gap-3 px-6 py-2 text-sm"
-              >
-                <span className="w-20 shrink-0 text-xs tabular-nums text-muted-foreground">
-                  {r.txDate}
-                </span>
-                <span className="w-28 shrink-0 text-right tabular-nums">
-                  {formatMoney(r.amount, r.currency)}
-                </span>
-                <span className="flex-1 truncate text-muted-foreground">
-                  {r.merchant ?? ''}
-                </span>
-                <ClassificationBadge value={r.classification} />
-                <Pill tone={st.tone}>{st.label}</Pill>
+              <li key={r.id}>
+                <Link
+                  to="/reconcile/$id"
+                  params={{ id: r.id }}
+                  className="flex items-center gap-3 px-6 py-2 text-sm hover:bg-muted/50"
+                >
+                  <span className="w-20 shrink-0 text-xs tabular-nums text-muted-foreground">
+                    {r.txDate}
+                  </span>
+                  <span className="w-28 shrink-0 text-right tabular-nums">
+                    {formatMoney(r.amount, r.currency)}
+                  </span>
+                  <span className="flex-1 truncate text-muted-foreground">
+                    {r.merchant ?? ''}
+                  </span>
+                  <ClassificationBadge value={r.classification} />
+                  <Pill tone={st.tone}>{st.label}</Pill>
+                </Link>
               </li>
             )
           })}

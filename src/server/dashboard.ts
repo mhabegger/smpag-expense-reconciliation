@@ -40,6 +40,22 @@ export const getDashboard = createServerFn({ method: 'GET' }).handler(async () =
     const outstanding = exp
       .filter((t) => !t.bankLinked)
       .reduce((s, t) => s + chf(t), 0)
+    // per year, only years that still have something open (books close per year)
+    const years = [...new Set(exp.map((t) => t.txDate.slice(0, 4)))].sort()
+    const byYear = years
+      .map((year) => {
+        const ye = exp.filter((t) => t.txDate.startsWith(year))
+        const open = ye.filter((t) => !t.bankLinked)
+        return {
+          year,
+          count: ye.length,
+          registeredCount: ye.filter((t) => t.accountingLinked).length,
+          reimbursedCount: ye.length - open.length,
+          outstandingCount: open.length,
+          outstandingChf: open.reduce((s, t) => s + chf(t), 0),
+        }
+      })
+      .filter((y) => y.outstandingCount > 0)
     return {
       companyId: c.id,
       name: c.name,
@@ -53,6 +69,7 @@ export const getDashboard = createServerFn({ method: 'GET' }).handler(async () =
       reimbursedPct: exp.length ? reimbursed.length / exp.length : 0,
       fullyReconciledCount: fullyReconciled.length,
       outstandingChf: outstanding,
+      byYear,
     }
   })
 

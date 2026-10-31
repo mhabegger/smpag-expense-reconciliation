@@ -109,3 +109,17 @@ describe('mapRowsToCanonical — debit/credit indicator', () => {
     expect(r.errors).toContain('unknown debit/credit indicator "???"')
   })
 })
+
+describe('mapRowsToCanonical — skipped statuses', () => {
+  it('drops reverted card holds (Revolut State = REVERTED)', () => {
+    const rows = mapRowsToCanonical(
+      [
+        { Date: '2025-12-27', Amount: '-45.00', State: 'REVERTED' },
+        { Date: '2025-12-27', Amount: '-10.26', State: 'COMPLETED' },
+      ],
+      { txDate: 'Date', amount: 'Amount', statusText: 'State' },
+      { signConvention: 'signed', defaultCurrency: 'CHF', skipStatuses: ['REVERTED'] },
+    )
+    expect(rows.map((r) => r.amount)).toEqual([-1026])
+  })
+})

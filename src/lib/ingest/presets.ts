@@ -64,6 +64,8 @@ export const BUILTIN_PRESETS: BuiltinPreset[] = [
       decimalSeparator: '.',
       signConvention: 'signed',
       defaultCurrency: 'CHF',
+      // holds released by the merchant (EV chargers block 45–50 CHF) and declines
+      skipStatuses: ['REVERTED', 'DECLINED', 'FAILED'],
     },
   },
 

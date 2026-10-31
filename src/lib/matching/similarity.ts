@@ -10,6 +10,15 @@ function isPosOrRef(t: string): boolean {
 }
 
 /**
+ * A short invoice/order suffix mixing letters and digits, e.g. Google Cloud's
+ * "WHJ9ZX" / "KWV7Qw". Only dropped as the last of several tokens, so names
+ * like "1password" or "7eleven" survive.
+ */
+function isTrailingRef(t: string): boolean {
+  return t.length >= 5 && t.length <= 8 && /\d/.test(t) && /[a-z]/.test(t)
+}
+
+/**
  * Normalize a merchant/counterparty string for matching: lowercase, strip
  * diacritics & punctuation, drop legal-form / card-network / geo / id noise.
  */
@@ -27,6 +36,7 @@ export function normalizeMerchant(
     .filter((t) => !noiseTokens.has(t))
     .filter((t) => !cityCountry.has(t))
     .filter((t) => !isPosOrRef(t))
+  if (tokens.length > 1 && isTrailingRef(tokens[tokens.length - 1])) tokens.pop()
   return tokens.join(' ').trim()
 }
 

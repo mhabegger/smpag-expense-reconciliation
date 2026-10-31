@@ -10,31 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as TransactionsIndexRouteImport } from './routes/transactions/index'
-import { Route as SettingsIndexRouteImport } from './routes/settings/index'
-import { Route as ReconcileIndexRouteImport } from './routes/reconcile/index'
 import { Route as ImportIndexRouteImport } from './routes/import/index'
-import { Route as ReconcileIdRouteImport } from './routes/reconcile/$id'
 import { Route as ImportNewRouteImport } from './routes/import/new'
+import { Route as ReconcileIndexRouteImport } from './routes/reconcile/index'
+import { Route as ReconcileIdRouteImport } from './routes/reconcile/$id'
+import { Route as SettingsIndexRouteImport } from './routes/settings/index'
+import { Route as SuggestionsIndexRouteImport } from './routes/suggestions/index'
+import { Route as TransactionsIndexRouteImport } from './routes/transactions/index'
+import { Route as TriageIndexRouteImport } from './routes/triage/index'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const TransactionsIndexRoute = TransactionsIndexRouteImport.update({
-  id: '/transactions/',
-  path: '/transactions/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsIndexRoute = SettingsIndexRouteImport.update({
-  id: '/settings/',
-  path: '/settings/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReconcileIndexRoute = ReconcileIndexRouteImport.update({
-  id: '/reconcile/',
-  path: '/reconcile/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ImportIndexRoute = ImportIndexRouteImport.update({
@@ -42,14 +29,39 @@ const ImportIndexRoute = ImportIndexRouteImport.update({
   path: '/import/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ImportNewRoute = ImportNewRouteImport.update({
+  id: '/import/new',
+  path: '/import/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReconcileIndexRoute = ReconcileIndexRouteImport.update({
+  id: '/reconcile/',
+  path: '/reconcile/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReconcileIdRoute = ReconcileIdRouteImport.update({
   id: '/reconcile/$id',
   path: '/reconcile/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ImportNewRoute = ImportNewRouteImport.update({
-  id: '/import/new',
-  path: '/import/new',
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SuggestionsIndexRoute = SuggestionsIndexRouteImport.update({
+  id: '/suggestions/',
+  path: '/suggestions/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TransactionsIndexRoute = TransactionsIndexRouteImport.update({
+  id: '/transactions/',
+  path: '/transactions/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TriageIndexRoute = TriageIndexRouteImport.update({
+  id: '/triage/',
+  path: '/triage/',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -60,7 +72,9 @@ export interface FileRoutesByFullPath {
   '/import/': typeof ImportIndexRoute
   '/reconcile/': typeof ReconcileIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/suggestions/': typeof SuggestionsIndexRoute
   '/transactions/': typeof TransactionsIndexRoute
+  '/triage/': typeof TriageIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -69,7 +83,9 @@ export interface FileRoutesByTo {
   '/import': typeof ImportIndexRoute
   '/reconcile': typeof ReconcileIndexRoute
   '/settings': typeof SettingsIndexRoute
+  '/suggestions': typeof SuggestionsIndexRoute
   '/transactions': typeof TransactionsIndexRoute
+  '/triage': typeof TriageIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -79,7 +95,9 @@ export interface FileRoutesById {
   '/import/': typeof ImportIndexRoute
   '/reconcile/': typeof ReconcileIndexRoute
   '/settings/': typeof SettingsIndexRoute
+  '/suggestions/': typeof SuggestionsIndexRoute
   '/transactions/': typeof TransactionsIndexRoute
+  '/triage/': typeof TriageIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -90,7 +108,9 @@ export interface FileRouteTypes {
     | '/import/'
     | '/reconcile/'
     | '/settings/'
+    | '/suggestions/'
     | '/transactions/'
+    | '/triage/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -99,7 +119,9 @@ export interface FileRouteTypes {
     | '/import'
     | '/reconcile'
     | '/settings'
+    | '/suggestions'
     | '/transactions'
+    | '/triage'
   id:
     | '__root__'
     | '/'
@@ -108,7 +130,9 @@ export interface FileRouteTypes {
     | '/import/'
     | '/reconcile/'
     | '/settings/'
+    | '/suggestions/'
     | '/transactions/'
+    | '/triage/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -118,7 +142,9 @@ export interface RootRouteChildren {
   ImportIndexRoute: typeof ImportIndexRoute
   ReconcileIndexRoute: typeof ReconcileIndexRoute
   SettingsIndexRoute: typeof SettingsIndexRoute
+  SuggestionsIndexRoute: typeof SuggestionsIndexRoute
   TransactionsIndexRoute: typeof TransactionsIndexRoute
+  TriageIndexRoute: typeof TriageIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -130,18 +156,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/transactions/': {
-      id: '/transactions/'
-      path: '/transactions'
-      fullPath: '/transactions/'
-      preLoaderRoute: typeof TransactionsIndexRouteImport
+    '/import/': {
+      id: '/import/'
+      path: '/import'
+      fullPath: '/import/'
+      preLoaderRoute: typeof ImportIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/settings/': {
-      id: '/settings/'
-      path: '/settings'
-      fullPath: '/settings/'
-      preLoaderRoute: typeof SettingsIndexRouteImport
+    '/import/new': {
+      id: '/import/new'
+      path: '/import/new'
+      fullPath: '/import/new'
+      preLoaderRoute: typeof ImportNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reconcile/': {
@@ -151,13 +177,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReconcileIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/import/': {
-      id: '/import/'
-      path: '/import'
-      fullPath: '/import/'
-      preLoaderRoute: typeof ImportIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/reconcile/$id': {
       id: '/reconcile/$id'
       path: '/reconcile/$id'
@@ -165,11 +184,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReconcileIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/import/new': {
-      id: '/import/new'
-      path: '/import/new'
-      fullPath: '/import/new'
-      preLoaderRoute: typeof ImportNewRouteImport
+    '/settings/': {
+      id: '/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/suggestions/': {
+      id: '/suggestions/'
+      path: '/suggestions'
+      fullPath: '/suggestions/'
+      preLoaderRoute: typeof SuggestionsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/transactions/': {
+      id: '/transactions/'
+      path: '/transactions'
+      fullPath: '/transactions/'
+      preLoaderRoute: typeof TransactionsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/triage/': {
+      id: '/triage/'
+      path: '/triage'
+      fullPath: '/triage/'
+      preLoaderRoute: typeof TriageIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -182,7 +222,9 @@ const rootRouteChildren: RootRouteChildren = {
   ImportIndexRoute: ImportIndexRoute,
   ReconcileIndexRoute: ReconcileIndexRoute,
   SettingsIndexRoute: SettingsIndexRoute,
+  SuggestionsIndexRoute: SuggestionsIndexRoute,
   TransactionsIndexRoute: TransactionsIndexRoute,
+  TriageIndexRoute: TriageIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

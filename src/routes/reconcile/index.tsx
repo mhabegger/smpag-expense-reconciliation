@@ -25,9 +25,12 @@ import {
 import {
   Amount,
   ClassificationBadge,
+  COMPANY_DOT,
   Pill,
   ReconBadge,
 } from '#/components/shared/bits.tsx'
+import { formatMoney } from '#/lib/money.ts'
+import { cn } from '#/lib/utils.ts'
 import { sortIcon } from '#/components/shared/sort.tsx'
 
 type QueueStatus = 'all' | 'open' | 'unclassified' | 'reconciled' | 'pending'
@@ -48,7 +51,7 @@ function ReconcileQueue() {
   const [sortBy, setSortBy] = useState<
     'txDate' | 'merchant' | 'amount' | 'classification' | 'reconStatus'
   >('txDate')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const toggleSort = (by: typeof sortBy) => {
     if (sortBy === by) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else {
@@ -128,8 +131,32 @@ function ReconcileQueue() {
         }
       />
       <div className="space-y-4 px-8 py-6">
-        {counts && (
-          <div className="grid gap-3 sm:grid-cols-5">
+        {counts && data && (
+          <div className="grid gap-3 sm:grid-cols-6">
+            <Card>
+              <CardContent className="py-4">
+                <div className="text-xs text-muted-foreground">Not yet reimbursed</div>
+                <div className="mt-1 text-2xl font-semibold tabular-nums text-warning">
+                  {formatMoney(data.outstanding.total, 'CHF')}
+                </div>
+                <div className="mt-2 space-y-0.5 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-muted-foreground">
+                      <span className={cn('size-2 rounded-full', COMPANY_DOT.swiss_media_partners)} />
+                      SMP
+                    </span>
+                    <span className="tabular-nums">{formatMoney(data.outstanding.smp, 'CHF')}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-muted-foreground">
+                      <span className={cn('size-2 rounded-full', COMPANY_DOT.deliver_media)} />
+                      DM
+                    </span>
+                    <span className="tabular-nums">{formatMoney(data.outstanding.dm, 'CHF')}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
             <Stat label="Total expenses" value={counts.total} />
             <Stat label="Unclassified" value={counts.unclassified} tone="warning" />
             <Stat label="Open" value={counts.open} tone="warning" />

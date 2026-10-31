@@ -10,12 +10,16 @@ import {
   Settings,
   Wallet,
   Undo2,
+  Layers,
+  Link2,
 } from 'lucide-react'
 import { cn } from '#/lib/utils.ts'
 import { popUndo, subscribeUndo, undoSize } from '#/lib/undo.ts'
 
 const NAV = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+  { to: '/triage', label: 'Triage', icon: Layers },
+  { to: '/suggestions', label: 'Suggestions', icon: Link2 },
   { to: '/reconcile', label: 'Reconcile', icon: ListChecks },
   { to: '/transactions', label: 'Transactions', icon: Receipt },
   { to: '/import', label: 'Import', icon: Upload },

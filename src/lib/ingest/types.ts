@@ -50,6 +50,7 @@ export interface MappingOptions {
   encoding?: string
   // structural row handling
   dropRowsWithoutField?: NormalizedField // drop rows where this canonical field is empty (continuation rows)
+  skipStatuses?: string[] // drop rows whose statusText is one of these (e.g. Revolut REVERTED holds), case-insensitive
 }
 
 /** A fully normalized transaction row produced by a parser. Amounts are signed

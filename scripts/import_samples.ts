@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import { and, eq, sql } from 'drizzle-orm'
 import { db } from '../src/db/client.ts'
 import {
@@ -15,13 +15,20 @@ import { runMatching } from '../src/lib/matching/engine.ts'
 import { formatMoney } from '../src/lib/money.ts'
 
 async function main() {
+  // explicit file paths win; otherwise import everything in ./samples
+  const args = process.argv.slice(2)
   const dir = resolve('samples')
+  const paths = args.length
+    ? args.map((p) => resolve(p))
+    : readdirSync(dir)
+        .filter((n) => !n.startsWith('.'))
+        .map((n) => resolve(dir, n))
   const accs = db.select().from(accounts).all()
   const byInstitute = new Map(accs.map((a) => [a.institute, a]))
 
-  for (const name of readdirSync(dir)) {
-    if (name.startsWith('.')) continue
-    const buf = readFileSync(resolve(dir, name))
+  for (const path of paths) {
+    const name = basename(path)
+    const buf = readFileSync(path)
     const meta = analyzeFile(buf, name)
     const institute = meta.institute
     const account = institute ? byInstitute.get(institute) : undefined

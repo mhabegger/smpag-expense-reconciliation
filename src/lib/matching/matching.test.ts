@@ -25,6 +25,12 @@ describe('similarity', () => {
     )
     expect(normalizeMerchant('MEDIAMARKT ZÜRICH', noise, city)).toBe('mediamarkt')
   })
+  it('drops a trailing invoice suffix but keeps names with digits', () => {
+    expect(normalizeMerchant('GOOGLE*CLOUD WHJ9ZX', noise, city)).toBe('google cloud')
+    expect(normalizeMerchant('Google CLOUD KWV7Qw', noise, city)).toBe('google cloud')
+    expect(normalizeMerchant('1Password', noise, city)).toBe('1password')
+    expect(normalizeMerchant('Pho91 B.V.', noise, city)).toContain('pho91')
+  })
   it('jaroWinkler rewards prefix matches', () => {
     expect(jaroWinkler('anthropic', 'anthropic')).toBe(1)
     expect(jaroWinkler('mediamarkt', 'media markt')).toBeGreaterThan(0.8)

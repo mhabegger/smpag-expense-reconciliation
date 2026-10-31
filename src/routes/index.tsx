@@ -62,6 +62,32 @@ function Dashboard() {
                         {formatMoney(c.outstandingChf, 'CHF')}
                       </div>
                     </div>
+                    {c.byYear.length > 0 && (
+                      <div className="space-y-2.5 rounded-md border border-border p-3">
+                        {c.byYear.map((y) => (
+                          <div key={y.year}>
+                            <div className="flex items-baseline gap-3 text-sm">
+                              <span className="w-10 font-medium">{y.year}</span>
+                              <span className="flex-1 text-muted-foreground">
+                                {y.outstandingCount} of {y.count} open
+                              </span>
+                              <span className="font-medium tabular-nums text-warning">
+                                {formatMoney(y.outstandingChf, 'CHF')}
+                              </span>
+                            </div>
+                            <div className="mt-1 flex items-center gap-3 pl-[3.25rem] text-xs text-muted-foreground">
+                              <Progress
+                                value={(y.reimbursedCount / y.count) * 100}
+                                className="h-1 flex-1"
+                              />
+                              <span className="w-36 text-right tabular-nums">
+                                {y.registeredCount} registered · {y.reimbursedCount} reimbursed
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div className="grid grid-cols-2 gap-4">
                       <Metric
                         label="Registered"
